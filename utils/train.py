@@ -10,6 +10,7 @@ from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 import itertools
 import traceback
+import torchaudio
 
 from datasets.dataloader import create_dataloader
 from utils.writer import MyWriter
@@ -60,16 +61,25 @@ def train(rank, args, chkpt_path, hp, hp_str):
         )
         logger = logging.getLogger()
         writer = MyWriter(hp, log_dir)
-        valloader = create_dataloader(hp, args, False, device='cpu')
-        stft = TacotronSTFT(filter_length=hp.audio.filter_length,
-                            hop_length=hp.audio.hop_length,
-                            win_length=hp.audio.win_length,
-                            n_mel_channels=hp.audio.n_mel_channels,
-                            sampling_rate=hp.audio.sampling_rate,
-                            mel_fmin=hp.audio.mel_fmin,
-                            mel_fmax=hp.audio.mel_fmax,
-                            center=False,
-                            device=device)
+        valloader = create_dataloader(hp, args, False)
+        # stft = TacotronSTFT(filter_length=hp.audio.filter_length,
+        #                     hop_length=hp.audio.hop_length,
+        #                     win_length=hp.audio.win_length,
+        #                     n_mel_channels=hp.audio.n_mel_channels,
+        #                     sampling_rate=hp.audio.sampling_rate,
+        #                     mel_fmin=hp.audio.mel_fmin,
+        #                     mel_fmax=hp.audio.mel_fmax,
+        #                     center=False,
+        #                     device=device)
+        stft = torchaudio.transforms.MelSpectrogram(
+                                sample_rate=hp.audio.sampling_rate,
+                                n_fft=hp.audio.filter_length,
+                                hop_length=hp.audio.hop_length,
+                                n_mels=hp.audio.n_mel_channels,
+                                center=False,
+                                power=1.0,
+                                normalized=True,
+                                ).to(device=device)
 
     if chkpt_path is not None:
         if rank == 0:
@@ -102,7 +112,7 @@ def train(rank, args, chkpt_path, hp, hp_str):
     # if not consistent, it'll horribly slow down.
     torch.backends.cudnn.benchmark = True
 
-    trainloader = create_dataloader(hp, args, True, device='cpu')
+    trainloader = create_dataloader(hp, args, True)
 
     model_g.train()
     model_d.train()
@@ -116,7 +126,6 @@ def train(rank, args, chkpt_path, hp, hp_str):
             with torch.no_grad():
                 validate(hp, args, model_g, model_d, valloader, stft, writer, step, device)
 
-        trainloader.dataset.shuffle_mapping()
         if rank == 0:
             loader = tqdm.tqdm(trainloader, desc='Loading train data')
         else:

@@ -16,15 +16,19 @@ def validate(hp, args, generator, discriminator, valloader, stft, writer, step, 
         noise = torch.randn(1, hp.gen.noise_dim, mel.size(2)).to(device)
 
         fake_audio = generator(mel, noise)[:,:,:audio.size(2)]
-
-        mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
-        mel_real = stft.mel_spectrogram(audio.squeeze(1))
+        audio = audio[:, :, :fake_audio.size(2)]
+        mel_fake = stft(fake_audio.squeeze(1))
+        mel_real = stft(audio.squeeze(1))
+        # mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
+        # mel_real = stft.mel_spectrogram(audio.squeeze(1))
 
         mel_loss += F.l1_loss(mel_fake, mel_real).item()
 
         if idx < hp.log.num_audio:
-            spec_fake = stft.linear_spectrogram(fake_audio.squeeze(1))
-            spec_real = stft.linear_spectrogram(audio.squeeze(1))
+            spec_fake = stft(fake_audio.squeeze(1))
+            spec_real = stft(audio.squeeze(1))
+            # spec_fake = stft.linear_spectrogram(fake_audio.squeeze(1))
+            # spec_real = stft.linear_spectrogram(audio.squeeze(1))
 
             audio = audio[0][0].cpu().detach().numpy()
             fake_audio = fake_audio[0][0].cpu().detach().numpy()

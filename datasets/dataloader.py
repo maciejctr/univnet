@@ -1,73 +1,58 @@
-import os
-import glob
 import torch
 import random
+import torchaudio
 import numpy as np
-from torch.utils.data import DistributedSampler, DataLoader, Dataset
-from collections import Counter
+from torch.utils.data import DataLoader, Dataset
+from pathlib import Path
 
 from utils.utils import read_wav_np
 from utils.stft import TacotronSTFT
 
 
-def create_dataloader(hp, args, train, device):
+def create_dataloader(hp, args, train):
     if train:
-        dataset = MelFromDisk(hp, hp.data.train_dir, hp.data.train_meta, args, train, device)
+        dataset = MelFromDisk(hp, Path(hp.data.data_dir), "train.tsv", args, train)
         return DataLoader(dataset=dataset, batch_size=hp.train.batch_size, shuffle=False,
                           num_workers=hp.train.num_workers, pin_memory=True, drop_last=True)
 
     else:
-        dataset = MelFromDisk(hp, hp.data.val_dir, hp.data.val_meta, args, train, device)
+        dataset = MelFromDisk(hp, Path(hp.data.data_dir), "validation.tsv", args, train)
         return DataLoader(dataset=dataset, batch_size=1, shuffle=False,
             num_workers=hp.train.num_workers, pin_memory=True, drop_last=False)
 
 
 class MelFromDisk(Dataset):
-    def __init__(self, hp, data_dir, metadata_path, args, train, device):
+    def __init__(self, hp, data_dir, metadata, args, train):
         random.seed(hp.train.seed)
         self.hp = hp
         self.args = args
         self.train = train
-        self.data_dir = data_dir
-        metadata_path = os.path.join(data_dir, metadata_path)
-        self.meta = self.load_metadata(metadata_path)
-        self.stft = TacotronSTFT(hp.audio.filter_length, hp.audio.hop_length, hp.audio.win_length,
-                                 hp.audio.n_mel_channels, hp.audio.sampling_rate,
-                                 hp.audio.mel_fmin, hp.audio.mel_fmax, center=False, device=device)
 
         self.mel_segment_length = hp.audio.segment_length // hp.audio.hop_length
         self.shuffle = hp.train.spk_balanced
+        self.data_dir = data_dir
+        with open(Path(data_dir / metadata), 'r') as file:
+            lines = file.readlines()
+            self.audio_files= [Path(data_dir / line.split('\t')[0]) for line in lines]
 
-        if train and hp.train.spk_balanced:
-            # balanced sampling for each speaker
-            speaker_counter = Counter((spk_id \
-                                       for audiopath, text, spk_id in self.meta))
-            weights = [1.0 / speaker_counter[spk_id] \
-                       for audiopath, text, spk_id in self.meta]
-
-            self.mapping_weights = torch.DoubleTensor(weights)
-
-        elif train:
-            weights = [1.0 / len(self.meta) for _, _, _ in self.meta]
-            self.mapping_weights = torch.DoubleTensor(weights)
-
+        self.stft = torchaudio.transforms.MelSpectrogram(
+                                sample_rate=hp.audio.sampling_rate,
+                                n_fft=hp.audio.filter_length,
+                                hop_length=hp.audio.hop_length,
+                                n_mels=hp.audio.n_mel_channels,
+                                center=False,
+                                power=1.0,
+                                normalized=True,
+                                )
 
     def __len__(self):
-        return len(self.meta)
+        return len(self.audio_files)
 
     def __getitem__(self, idx):
-        if self.train:
-            idx = torch.multinomial(self.mapping_weights, 1).item()
-            return self.my_getitem(idx)
-        else:
-            return self.my_getitem(idx)
-
-    def shuffle_mapping(self):
-        random.shuffle(self.mapping_weights)
+        return self.my_getitem(idx)
 
     def my_getitem(self, idx):
-        wavpath, _, _ = self.meta[idx]
-        wavpath = os.path.join(self.data_dir, wavpath)
+        wavpath= self.audio_files[idx]
         sr, audio = read_wav_np(wavpath)
 
         if len(audio) < self.hp.audio.segment_length + self.hp.audio.pad_short:
@@ -90,7 +75,7 @@ class MelFromDisk(Dataset):
         return mel, audio
 
     def get_mel(self, wavpath):
-        melpath = wavpath.replace('.wav', '.mel')
+        melpath = wavpath.with_suffix('.mel')
         try:
             mel = torch.load(melpath, map_location='cpu')
             assert mel.size(0) == self.hp.audio.n_mel_channels, \
@@ -107,7 +92,7 @@ class MelFromDisk(Dataset):
                              mode='constant', constant_values=0.0)
 
             wav = torch.from_numpy(wav).unsqueeze(0)
-            mel = self.stft.mel_spectrogram(wav)
+            mel = self.stft(wav)
 
             mel = mel.squeeze(0)
 
