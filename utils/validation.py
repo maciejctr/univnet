@@ -19,8 +19,8 @@ def validate(hp, args, generator, discriminator, valloader, stft, writer, step, 
         audio = audio[:, :, :fake_audio.size(2)]
         mel_fake = stft(fake_audio.squeeze(1))
         mel_real = stft(audio.squeeze(1))
-        # mel_fake = stft.mel_spectrogram(fake_audio.squeeze(1))
-        # mel_real = stft.mel_spectrogram(audio.squeeze(1))
+        # mel_fake_tacotron = stft.mel_spectrogram(fake_audio.squeeze(1))
+        # mel_real_tacotron = stft.mel_spectrogram(audio.squeeze(1))
 
         mel_loss += F.l1_loss(mel_fake, mel_real).item()
 

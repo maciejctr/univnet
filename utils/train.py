@@ -18,6 +18,7 @@ from utils.stft import TacotronSTFT
 from utils.stft_loss import MultiResolutionSTFTLoss
 from model.generator import Generator
 from model.discriminator import Discriminator
+from model.pad import PadForMelspectrogram
 from .utils import get_commit_hash
 from .validation import validate
 
@@ -62,24 +63,17 @@ def train(rank, args, chkpt_path, hp, hp_str):
         logger = logging.getLogger()
         writer = MyWriter(hp, log_dir)
         valloader = create_dataloader(hp, args, False)
-        # stft = TacotronSTFT(filter_length=hp.audio.filter_length,
-        #                     hop_length=hp.audio.hop_length,
-        #                     win_length=hp.audio.win_length,
-        #                     n_mel_channels=hp.audio.n_mel_channels,
-        #                     sampling_rate=hp.audio.sampling_rate,
-        #                     mel_fmin=hp.audio.mel_fmin,
-        #                     mel_fmax=hp.audio.mel_fmax,
-        #                     center=False,
-        #                     device=device)
-        stft = torchaudio.transforms.MelSpectrogram(
-                                sample_rate=hp.audio.sampling_rate,
-                                n_fft=hp.audio.filter_length,
-                                hop_length=hp.audio.hop_length,
-                                n_mels=hp.audio.n_mel_channels,
-                                center=False,
-                                power=1.0,
-                                normalized=True,
-                                ).to(device=device)
+        stft = nn.Sequential(PadForMelspectrogram(hp),
+                             torchaudio.transforms.MelSpectrogram(
+                                                     sample_rate=hp.audio.sampling_rate,
+                                                     n_fft=hp.audio.filter_length,
+                                                     hop_length=hp.audio.hop_length,
+                                                     n_mels=hp.audio.n_mel_channels,
+                                                     center=False,
+                                                     power=1.0,
+                                                     normalized=True,
+                                                     )
+                             ).to(device=device)
 
     if chkpt_path is not None:
         if rank == 0:
