@@ -28,14 +28,14 @@ if __name__ == '__main__':
     assert hp.audio.hop_length == 256, \
         'hp.audio.hop_length must be equal to 256, got %d' % hp.audio.hop_length
 
-    args.num_gpus = 0
+    args.num_gpus = 1
     torch.manual_seed(hp.train.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(hp.train.seed)
-        args.num_gpus = torch.cuda.device_count()
-        print('Batch size per GPU :', hp.train.batch_size)
-    else:
-        pass
+    # if torch.cuda.is_available():
+    #     torch.cuda.manual_seed(hp.train.seed)
+    #     args.num_gpus = torch.cuda.device_count()
+    #     print('Batch size per GPU :', hp.train.batch_size)
+    # else:
+    #     pass
 
     if args.num_gpus > 1:
         mp.spawn(train, nprocs=args.num_gpus,

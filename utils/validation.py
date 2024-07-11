@@ -41,3 +41,5 @@ def validate(hp, args, generator, discriminator, valloader, stft, writer, step, 
     writer.log_validation(mel_loss, generator, discriminator, step)
 
     torch.backends.cudnn.benchmark = True
+
+    return mel_loss

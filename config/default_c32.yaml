@@ -1,9 +1,10 @@
 data:
-  data_dir: '/home/ubuntu/data_celebs_v7'
+  data_dir: '/home/maciej/data'
 #############################
 train:
-  num_workers: 8
-  batch_size: 32
+  num_workers: 20
+  batch_size: 64
+
   optimizer: 'adam'
   seed: 1234
   adam:
@@ -51,8 +52,8 @@ dist_config:
 #############################
 log:
   summary_interval: 100
-  validation_interval: 1
-  save_interval: 1
+  validation_interval: 2000
+  save_interval: 2000
   num_audio: 5
   chkpt_dir: 'chkpt'
   log_dir: 'logs'

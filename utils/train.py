@@ -44,6 +44,8 @@ def train(rank, args, chkpt_path, hp, hp_str):
 
     init_epoch = -1
     step = 0
+    best_val_loss = 1e12
+    val_loss = 1e12
 
     # define logger, writer, valloader, stft at rank_zero
     if rank == 0:
@@ -115,17 +117,13 @@ def train(rank, args, chkpt_path, hp, hp_str):
     stft_criterion = MultiResolutionSTFTLoss(device, resolutions)
 
     for epoch in itertools.count(init_epoch+1):
-        
-        if rank == 0 and epoch % hp.log.validation_interval == 0:
-            with torch.no_grad():
-                validate(hp, args, model_g, model_d, valloader, stft, writer, step, device)
-
         if rank == 0:
             loader = tqdm.tqdm(trainloader, desc='Loading train data')
         else:
             loader = trainloader
 
         for mel, audio in loader:
+            step += 1
 
             mel = mel.to(device)
             audio = audio.to(device)
@@ -169,7 +167,6 @@ def train(rank, args, chkpt_path, hp, hp_str):
             loss_d.backward()
             optim_d.step()
 
-            step += 1
             # logging
             loss_g = loss_g.item()
             loss_d = loss_d.item()
@@ -178,17 +175,35 @@ def train(rank, args, chkpt_path, hp, hp_str):
                 writer.log_training(loss_g, loss_d, stft_loss.item(), score_loss.item(), step)
                 loader.set_description("g %.04f d %.04f | step %d" % (loss_g, loss_d, step))
 
-        if rank == 0 and epoch % hp.log.save_interval == 0:
-            save_path = os.path.join(pt_dir, '%s_%04d.pt'
-                                     % (args.name, epoch))
-            torch.save({
-                'model_g': (model_g.module if args.num_gpus > 1 else model_g).state_dict(),
-                'model_d': (model_d.module if args.num_gpus > 1 else model_d).state_dict(),
-                'optim_g': optim_g.state_dict(),
-                'optim_d': optim_d.state_dict(),
-                'step': step,
-                'epoch': epoch,
-                'hp_str': hp_str,
-                'githash': githash,
-            }, save_path)
-            logger.info("Saved checkpoint to: %s" % save_path)
+            if rank == 0 and step % hp.log.validation_interval == 0:
+                with torch.no_grad():
+                    val_loss = validate(hp, args, model_g, model_d, valloader, stft, writer, step, device)
+
+            if rank == 0 and step % hp.log.save_interval == 0:
+                save_path = os.path.join(pt_dir, 'last.pt')
+                torch.save({
+                    'model_g': (model_g.module if args.num_gpus > 1 else model_g).state_dict(),
+                    'model_d': (model_d.module if args.num_gpus > 1 else model_d).state_dict(),
+                    'optim_g': optim_g.state_dict(),
+                    'optim_d': optim_d.state_dict(),
+                    'step': step,
+                    'epoch': epoch,
+                    'hp_str': hp_str,
+                    'githash': githash,
+                }, save_path)
+                logger.info("Saved last checkpoint to: %s" % save_path)
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    save_path = os.path.join(pt_dir, f'best_{val_loss}.pt')
+                    torch.save({
+                        'model_g': (model_g.module if args.num_gpus > 1 else model_g).state_dict(),
+                        'model_d': (model_d.module if args.num_gpus > 1 else model_d).state_dict(),
+                        'optim_g': optim_g.state_dict(),
+                        'optim_d': optim_d.state_dict(),
+                        'step': step,
+                        'epoch': epoch,
+                        'hp_str': hp_str,
+                        'githash': githash,
+                    }, save_path)
+                    logger.info("Saved best checkpoint to: %s" % save_path)

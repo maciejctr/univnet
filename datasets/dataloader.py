@@ -7,12 +7,13 @@ from pathlib import Path
 
 from utils.utils import read_wav_np
 from utils.stft import TacotronSTFT
+from model.pad import PadForMelspectrogram
 
 
 def create_dataloader(hp, args, train):
     if train:
         dataset = MelFromDisk(hp, Path(hp.data.data_dir), "train.tsv", args, train)
-        return DataLoader(dataset=dataset, batch_size=hp.train.batch_size, shuffle=False,
+        return DataLoader(dataset=dataset, batch_size=hp.train.batch_size, shuffle=True,
                           num_workers=hp.train.num_workers, pin_memory=True, drop_last=True)
 
     else:
@@ -35,15 +36,17 @@ class MelFromDisk(Dataset):
             lines = file.readlines()
             self.audio_files= [Path(data_dir / line.split('\t')[0]) for line in lines]
 
-        self.stft = torchaudio.transforms.MelSpectrogram(
-                                sample_rate=hp.audio.sampling_rate,
-                                n_fft=hp.audio.filter_length,
-                                hop_length=hp.audio.hop_length,
-                                n_mels=hp.audio.n_mel_channels,
-                                center=False,
-                                power=1.0,
-                                normalized=True,
-                                )
+        self.stft = torch.nn.Sequential(PadForMelspectrogram(hp),
+                             torchaudio.transforms.MelSpectrogram(
+                                                     sample_rate=hp.audio.sampling_rate,
+                                                     n_fft=hp.audio.filter_length,
+                                                     hop_length=hp.audio.hop_length,
+                                                     n_mels=hp.audio.n_mel_channels,
+                                                     center=False,
+                                                     power=1.0,
+                                                     normalized=True,
+                                                     )
+                             )
 
     def __len__(self):
         return len(self.audio_files)
@@ -54,13 +57,16 @@ class MelFromDisk(Dataset):
     def my_getitem(self, idx):
         wavpath= self.audio_files[idx]
         sr, audio = read_wav_np(wavpath)
+        if audio is None:
+            audio = torch.zeros((1, self.hp.audio.segment_length + self.hp.audio.pad_short))
+        else:
+            if len(audio) < self.hp.audio.segment_length + self.hp.audio.pad_short:
+                audio = np.pad(audio, (0, self.hp.audio.segment_length + self.hp.audio.pad_short - len(audio)), \
+                        mode='constant', constant_values=0.0)
+            
+            audio = torch.from_numpy(audio).unsqueeze(0)
 
-        if len(audio) < self.hp.audio.segment_length + self.hp.audio.pad_short:
-            audio = np.pad(audio, (0, self.hp.audio.segment_length + self.hp.audio.pad_short - len(audio)), \
-                    mode='constant', constant_values=0.0)
-
-        audio = torch.from_numpy(audio).unsqueeze(0)
-        mel = self.get_mel(wavpath)
+        mel = self.get_mel(audio)
 
         if self.train:
             max_mel_start = mel.size(1) - self.mel_segment_length -1
@@ -74,29 +80,31 @@ class MelFromDisk(Dataset):
 
         return mel, audio
 
-    def get_mel(self, wavpath):
-        melpath = wavpath.with_suffix('.mel')
-        try:
-            mel = torch.load(melpath, map_location='cpu')
-            assert mel.size(0) == self.hp.audio.n_mel_channels, \
-                'Mel dimension mismatch: expected %d, got %d' % \
-                (self.hp.audio.n_mel_channels, mel.size(0))
+    def get_mel(self, audio):
+        # melpath = wavpath.replace('.wav', '.mel')
+        # try:
+        #     mel = torch.load(melpath, map_location='cpu')
+        #     assert mel.size(0) == self.hp.audio.n_mel_channels, \
+        #         'Mel dimension mismatch: expected %d, got %d' % \
+        #         (self.hp.audio.n_mel_channels, mel.size(0))
 
-        except (FileNotFoundError, RuntimeError, TypeError, AssertionError):
-            sr, wav = read_wav_np(wavpath)
-            assert sr == self.hp.audio.sampling_rate, \
-                'sample mismatch: expected %d, got %d at %s' % (self.hp.audio.sampling_rate, sr, wavpath)
+        # except (FileNotFoundError, RuntimeError, TypeError, AssertionError):
+        # sr, wav = read_wav_np(wavpath)
+        # wav, sr = torchaudio.load(wavpath)
+        # if sr != self.hp.audio.sampling_rate:
+        #     wav = torchaudio.functional.resample(wav, orig_freq=sr, new_freq=self.hp.audio.sampling_rate)
+        #     sr = self.hp.audio.sampling_rate
 
-            if len(wav) < self.hp.audio.segment_length + self.hp.audio.pad_short:
-                wav = np.pad(wav, (0, self.hp.audio.segment_length + self.hp.audio.pad_short - len(wav)), \
-                             mode='constant', constant_values=0.0)
+        # if wav.size(1) < self.hp.audio.segment_length + self.hp.audio.pad_short:
+        #     wav = np.pad(wav, (0, self.hp.audio.segment_length + self.hp.audio.pad_short - len(wav)), \
+        #                     mode='constant', constant_values=0.0)
 
-            wav = torch.from_numpy(wav).unsqueeze(0)
-            mel = self.stft(wav)
+        # wav = torch.from_numpy(wav).unsqueeze(0)
+        mel = self.stft(audio)
 
-            mel = mel.squeeze(0)
+        mel = mel.squeeze(0)
 
-            torch.save(mel, melpath)
+            # torch.save(mel, melpath)
 
         return mel
 
